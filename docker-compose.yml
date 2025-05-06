@@ -13,8 +13,6 @@ services:
       - DB_NAME=${DB_NAME:-sports_platform}
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
-      - API_BASE_URL=${API_BASE_URL:-http://web-app:8080/api}
-      - API_TOKEN=${API_TOKEN}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./logs:/app/logs
