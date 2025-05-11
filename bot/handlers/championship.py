@@ -1,5 +1,3 @@
-# Добавим в bot/handlers/championship.py (новый файл)
-
 from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
 
