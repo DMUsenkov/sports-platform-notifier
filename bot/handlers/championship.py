@@ -39,8 +39,18 @@ def register_championship_handlers(dp: Dispatcher):
             return
 
         try:
+            # Получаем ID пользователя
+            user_id = user.id if hasattr(user, 'id') else user.get('id')
+
+            if not user_id:
+                await message.answer(
+                    "Не удалось определить ID пользователя. Пожалуйста, попробуйте заново привязать аккаунт, отправив /start.",
+                    reply_markup=get_championship_menu_keyboard()
+                )
+                return
+
             # Получаем рекомендуемые чемпионаты через API
-            championships = await api_client.get_recommended_championships(user.id)
+            championships = await api_client.get_recommended_championships(user_id)
 
             if not championships:
                 await message.answer(
@@ -76,7 +86,10 @@ def register_championship_handlers(dp: Dispatcher):
                 await message.answer(response, parse_mode="Markdown")
 
         except Exception as e:
-            logger.error(f"Ошибка при получении рекомендуемых чемпионатов для пользователя {user.id}: {e}")
+            # Безопасно логируем ошибку
+            user_id_str = str(user.id if hasattr(user, 'id') else user.get('id', 'unknown'))
+            logger.error(f"Ошибка при получении рекомендуемых чемпионатов для пользователя {user_id_str}: {e}")
+
             await message.answer(
                 "Произошла ошибка при получении рекомендаций. Пожалуйста, попробуйте позже.",
                 reply_markup=get_championship_menu_keyboard()

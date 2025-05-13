@@ -137,7 +137,6 @@ def register_user_handlers(dp: Dispatcher):
             reply_markup=get_help_keyboard()
         )
 
-    # Обработчик запроса "Мои матчи"
     @dp.message_handler(lambda message: message.text == "Мои матчи")
     async def my_matches(message: types.Message):
         """
@@ -146,75 +145,129 @@ def register_user_handlers(dp: Dispatcher):
         Args:
             message: Сообщение от пользователя
         """
-        user_data = UserRepository.get_by_telegram_id(str(message.from_user.id))
-        if not user_data:
+        user = UserRepository.get_by_telegram_id(str(message.from_user.id))
+        if not user:
             await message.answer(
                 "Ваш аккаунт не привязан к боту. Отправьте /start для привязки."
             )
             return
 
-        # Отправка сообщения о загрузке
-        loading_message = await message.answer("Загрузка ваших предстоящих матчей...")
-
         try:
-            # Получаем предстоящие матчи через API
-            matches = await api_client.get_user_matches(user_data['id'], status="upcoming")
+            # Получаем ID пользователя
+            user_id = user.id if hasattr(user, 'id') else user.get('id')
 
-            # Проверяем, есть ли ошибка в ответе
-            if matches and isinstance(matches, dict) and "error" in matches:
-                await loading_message.delete()
+            if not user_id:
                 await message.answer(
-                    f"Произошла ошибка при получении матчей: {matches['error']}"
+                    "Не удалось определить ID пользователя. Пожалуйста, попробуйте заново привязать аккаунт, отправив /start."
                 )
                 return
 
-            # Если матчей нет или список пуст
-            if not matches or len(matches) == 0:
-                await loading_message.delete()
-                await message.answer(
-                    "У вас нет предстоящих матчей."
-                )
+            # Получаем список матчей пользователя через API
+            matches = await api_client.get_user_matches(user_id, status="upcoming")
+
+            if not matches:
+                await message.answer("У вас нет предстоящих матчей.")
                 return
 
             # Формируем сообщение с информацией о матчах
-            response = "🏆 <b>Ваши предстоящие матчи:</b>\n\n"
+            response = "📅 Ваши предстоящие матчи:\n\n"
 
             for match in matches:
-                response += f"<b>{match['tournament_name']}</b>\n"
-                response += f"🆚 Соперник: <b>{match['opponent_name']}</b>\n"
-                response += f"📅 Дата: <b>{match['date']}</b> в <b>{match['time']}</b>\n"
-                response += f"📍 Место: <b>{match['location_name']}</b>\n"
-                response += f"🏢 Адрес: <b>{match['address']}</b>\n"
-                response += "\n"
+                response += f"🏆 *{match['tournament_name']}*\n"
+                response += f"🆚 Соперник: {match['opponent_name']}\n"
+                response += f"📍 Место: {match['location_name']}\n"
+                response += f"📆 Дата: {match['date']} в {match['time']}\n\n"
 
-            # Удаляем сообщение загрузки
-            await loading_message.delete()
-
-            # Отправляем сообщение с информацией о матчах
-            await message.answer(
-                response,
-                parse_mode="HTML"
-            )
-
-            # Если матчей больше одного, добавляем кнопки для управления
-            if len(matches) > 0:
-                first_match = matches[0]
-                await message.answer(
-                    "Действия для матча:",
-                    reply_markup=get_match_actions_keyboard(first_match['id'], user_data['id'])
-                )
+            # Отправляем сообщение с форматированием Markdown
+            await message.answer(response, parse_mode="Markdown")
 
         except Exception as e:
-            logger.error(f"Ошибка при получении предстоящих матчей пользователя {user_data['id']}: {e}")
-
-            # Удаляем сообщение загрузки
-            await loading_message.delete()
+            # Безопасное логирование
+            user_id_str = str(user.id if hasattr(user, 'id') else user.get('id', 'unknown'))
+            logger.error(f"Ошибка при получении матчей пользователя {user_id_str}: {e}")
 
             await message.answer(
                 "Произошла ошибка при получении информации о матчах. Пожалуйста, попробуйте позже."
             )
 
-    # Обработчик запроса "Мои чемпионаты"
+    @dp.message_handler(commands=['invitations'])
+    @dp.message_handler(lambda message: message.text == "Приглашения")
+    async def my_invitations(message: types.Message):
+        """
+        Обработчик запроса информации о приглашениях пользователя
+
+        Args:
+            message: Сообщение от пользователя
+        """
+        user = UserRepository.get_by_telegram_id(str(message.from_user.id))
+        if not user:
+            await message.answer(
+                "Ваш аккаунт не привязан к боту. Отправьте /start для привязки."
+            )
+            return
+
+        try:
+            # Получаем ID пользователя
+            user_id = user.id if hasattr(user, 'id') else user.get('id')
+
+            if not user_id:
+                await message.answer(
+                    "Не удалось определить ID пользователя. Пожалуйста, попробуйте заново привязать аккаунт, отправив /start."
+                )
+                return
+
+            # Получаем список приглашений пользователя через API
+            invitations = await api_client.get_user_invitations(user_id)
+
+            if not invitations:
+                await message.answer("У вас нет активных приглашений.")
+                return
+
+            has_sent_invitations = False
+
+            # Отправляем отдельные сообщения для каждого приглашения с кнопками
+            for invitation in invitations:
+                if invitation['type'] == 'team':
+                    # Создаем клавиатуру для этого приглашения
+                    markup = get_invitation_keyboard(invitation['invitation_id'], "team")
+
+                    # Отправляем отдельное сообщение для каждого приглашения в команду
+                    await message.answer(
+                        TEAM_INVITATION_MESSAGE.format(
+                            team_name=invitation.get('team_name', ''),
+                            sport_type=invitation.get('sport', ''),
+                            captain_name=invitation.get('inviter_name', '')
+                        ),
+                        reply_markup=markup
+                    )
+                    has_sent_invitations = True
+
+                elif invitation['type'] == 'committee':
+                    # Создаем клавиатуру для этого приглашения
+                    markup = get_invitation_keyboard(invitation['invitation_id'], "committee")
+
+                    # Отправляем отдельное сообщение для каждого приглашения в оргкомитет
+                    await message.answer(
+                        COMMITTEE_INVITATION_MESSAGE.format(
+                            committee_name=invitation.get('committee_name', ''),
+                            inviter_name=invitation.get('inviter_name', '')
+                        ),
+                        reply_markup=markup
+                    )
+                    has_sent_invitations = True
+
+            if not has_sent_invitations:
+                await message.answer("У вас нет активных приглашений.")
+
+        except Exception as e:
+            # Безопасное логирование
+            user_id_str = str(user.id if hasattr(user, 'id') else user.get('id', 'unknown'))
+            logger.error(f"Ошибка при получении приглашений пользователя {user_id_str}: {e}")
+
+            await message.answer(
+                "Произошла ошибка при получении информации о приглашениях. Пожалуйста, попробуйте позже."
+            )
+
     @dp.message_handler(lambda message: message.text == "Мои чемпионаты")
     async def my_championships(message: types.Message):
         """
@@ -223,20 +276,64 @@ def register_user_handlers(dp: Dispatcher):
         Args:
             message: Сообщение от пользователя
         """
-        user_data = UserRepository.get_by_telegram_id(str(message.from_user.id))
-        if not user_data:
+        user = UserRepository.get_by_telegram_id(str(message.from_user.id))
+        if not user:
             await message.answer(
                 "Ваш аккаунт не привязан к боту. Отправьте /start для привязки."
             )
             return
 
-        # Здесь должна быть логика получения информации о чемпионатах через API
-        await message.answer(
-            "Функция просмотра чемпионатов находится в разработке. "
-            "Скоро она будет доступна!"
-        )
+        try:
+            # Получаем ID пользователя
+            user_id = user.id if hasattr(user, 'id') else user.get('id')
 
-    # Обработчик запроса "Мои команды"
+            if not user_id:
+                await message.answer(
+                    "Не удалось определить ID пользователя. Пожалуйста, попробуйте заново привязать аккаунт, отправив /start."
+                )
+                return
+
+            # Получаем список чемпионатов пользователя через API
+            championships = await api_client.get_user_championships(user_id)
+
+            if not championships:
+                await message.answer("Вы не участвуете ни в одном чемпионате.")
+                return
+
+            # Формируем сообщение с информацией о чемпионатах
+            response = "🏆 Ваши чемпионаты:\n\n"
+
+            for championship in championships:
+                response += f"*{championship['name']}*\n"
+                response += f"⚽ Вид спорта: {championship['sport']}\n"
+                response += f"🌆 Город: {championship['city']}\n"
+
+                if championship['status'] == "active":
+                    status = "Активный"
+                elif championship['status'] == "past":
+                    status = "Завершен"
+                else:
+                    status = "Неизвестно"
+
+                response += f"📊 Статус: {status}\n"
+
+                if 'position' in championship and championship['position']:
+                    response += f"🏅 Позиция: {championship['position']}\n"
+
+                response += "\n"
+
+            # Отправляем сообщение с форматированием Markdown
+            await message.answer(response, parse_mode="Markdown")
+
+        except Exception as e:
+            # Безопасное логирование
+            user_id_str = str(user.id if hasattr(user, 'id') else user.get('id', 'unknown'))
+            logger.error(f"Ошибка при получении чемпионатов пользователя {user_id_str}: {e}")
+
+            await message.answer(
+                "Произошла ошибка при получении информации о чемпионатах. Пожалуйста, попробуйте позже."
+            )
+
     @dp.message_handler(lambda message: message.text == "Мои команды")
     async def my_teams(message: types.Message):
         """
@@ -245,18 +342,56 @@ def register_user_handlers(dp: Dispatcher):
         Args:
             message: Сообщение от пользователя
         """
-        user_data = UserRepository.get_by_telegram_id(str(message.from_user.id))
-        if not user_data:
+        user = UserRepository.get_by_telegram_id(str(message.from_user.id))
+        if not user:
             await message.answer(
                 "Ваш аккаунт не привязан к боту. Отправьте /start для привязки."
             )
             return
 
-        # Здесь должна быть логика получения информации о командах через API
-        await message.answer(
-            "Функция просмотра команд находится в разработке. "
-            "Скоро она будет доступна!"
-        )
+        try:
+            # Получаем ID пользователя
+            user_id = user.id if hasattr(user, 'id') else user.get('id')
+
+            if not user_id:
+                await message.answer(
+                    "Не удалось определить ID пользователя. Пожалуйста, попробуйте заново привязать аккаунт, отправив /start."
+                )
+                return
+
+            # Получаем список команд пользователя через API
+            teams = await api_client.get_user_teams(user_id)
+
+            if not teams:
+                await message.answer("Вы не состоите ни в одной команде.")
+                return
+
+            # Формируем сообщение с информацией о командах
+            response = "👥 Ваши команды:\n\n"
+
+            for team in teams:
+                response += f"*{team['name']}*\n"
+                response += f"⚽ Вид спорта: {team['sport']}\n"
+
+                if team.get('is_captain', False):
+                    response += "👑 Вы капитан этой команды\n"
+
+                response += "\n"
+
+            # Добавляем инструкцию по просмотру деталей команды
+            response += "Чтобы просмотреть подробную информацию о команде, отправьте /team_<id>, например /team_123"
+
+            # Отправляем сообщение с форматированием Markdown
+            await message.answer(response, parse_mode="Markdown")
+
+        except Exception as e:
+            # Безопасное логирование
+            user_id_str = str(user.id if hasattr(user, 'id') else user.get('id', 'unknown'))
+            logger.error(f"Ошибка при получении команд пользователя {user_id_str}: {e}")
+
+            await message.answer(
+                "Произошла ошибка при получении информации о командах. Пожалуйста, попробуйте позже."
+            )
 
     # Обработчики колбэков для меню помощи
     @dp.callback_query_handler(lambda c: c.data == 'help_about')
@@ -351,7 +486,6 @@ def register_user_handlers(dp: Dispatcher):
         # Устанавливаем состояние ожидания номера телефона
         await UserStates.waiting_for_phone.set()
 
-    # Функция для обработки номера телефона
     async def process_phone_number(message: types.Message, phone_number: str, state: FSMContext):
         """
         Обработка номера телефона
@@ -363,17 +497,21 @@ def register_user_handlers(dp: Dispatcher):
         """
         try:
             # Сначала проверяем в локальной базе данных
-            user_data = UserRepository.get_by_phone(phone_number)
+            user = UserRepository.get_by_phone(phone_number)
 
-            if user_data:
+            if user:
+                # Получаем имя и фамилию пользователя безопасно
+                first_name = user.first_name if hasattr(user, 'first_name') else user.get('first_name', 'Пользователь')
+                last_name = user.last_name if hasattr(user, 'last_name') else user.get('last_name', '')
+
                 # Обновляем Telegram ID пользователя
                 success = UserRepository.update_telegram_id(phone_number, str(message.from_user.id))
                 if success:
                     # Отправляем сообщение об успешной привязке
                     await message.answer(
                         PHONE_LINKED_MESSAGE.format(
-                            first_name=user_data['first_name'],
-                            last_name=user_data['last_name']
+                            first_name=first_name,
+                            last_name=last_name
                         ),
                         reply_markup=get_start_keyboard()
                     )
@@ -392,19 +530,25 @@ def register_user_handlers(dp: Dispatcher):
                 user_data = await api_client.get_user_data(phone_number)
                 if "error" not in user_data and user_data:
                     # Создаем пользователя в локальной базе данных
-                    created_user = UserRepository.create(
+                    user = UserRepository.create(
                         phone_number=phone_number,
                         first_name=user_data.get("first_name", "Пользователь"),
                         last_name=user_data.get("last_name", ""),
                         telegram_id=str(message.from_user.id)
                     )
 
-                    if created_user:
+                    # Проверяем результат создания пользователя
+                    if user:
+                        # Получаем имя и фамилию пользователя безопасно
+                        first_name = user.first_name if hasattr(user, 'first_name') else user.get('first_name',
+                                                                                                  'Пользователь')
+                        last_name = user.last_name if hasattr(user, 'last_name') else user.get('last_name', '')
+
                         # Отправляем сообщение об успешной привязке
                         await message.answer(
                             PHONE_LINKED_MESSAGE.format(
-                                first_name=created_user['first_name'],
-                                last_name=created_user['last_name']
+                                first_name=first_name,
+                                last_name=last_name
                             ),
                             reply_markup=get_start_keyboard()
                         )
@@ -429,4 +573,59 @@ def register_user_handlers(dp: Dispatcher):
             await message.answer(
                 PHONE_LINK_ERROR_MESSAGE,
                 reply_markup=get_phone_keyboard()
+            )
+
+    @dp.message_handler(lambda message: message.text.startswith('/team_'))
+    async def team_details(message: types.Message):
+        """
+        Обработчик запроса информации о конкретной команде
+
+        Args:
+            message: Сообщение от пользователя
+        """
+        user = UserRepository.get_by_telegram_id(str(message.from_user.id))
+        if not user:
+            await message.answer(
+                "Ваш аккаунт не привязан к боту. Отправьте /start для привязки."
+            )
+            return
+
+        try:
+            # Извлекаем ID команды из команды
+            team_id = int(message.text.split('_')[1])
+
+            # Получаем детальную информацию о команде через API
+            team = await api_client.get_team_details(team_id)
+
+            if not team:
+                await message.answer("Команда не найдена или у вас нет доступа к ней.")
+                return
+
+            # Формируем сообщение с информацией о команде
+            response = f"👥 *{team['name']}*\n\n"
+            response += f"⚽ Вид спорта: {team['sport']}\n"
+            response += f"👨‍👩‍👧‍👦 Участников: {team['count_member']}\n"
+            response += f"🏆 Побед: {team.get('wins', 0)}\n"
+            response += f"❌ Поражений: {team.get('loss', 0)}\n\n"
+
+            # Список участников команды
+            response += "👥 *Состав команды:*\n"
+            for member in team.get('members', []):
+                name = f"{member['first_name']} {member['last_name']}"
+                if member.get('is_captain', False):
+                    name += " 👑"
+                response += f"- {name}\n"
+
+            # Отправляем сообщение с форматированием Markdown
+            await message.answer(response, parse_mode="Markdown")
+
+        except ValueError:
+            await message.answer("Неверный формат команды. Используйте /team_<id>, например /team_123")
+        except Exception as e:
+            # Безопасное логирование
+            user_id_str = str(user.id if hasattr(user, 'id') else user.get('id', 'unknown'))
+            logger.error(f"Ошибка при получении информации о команде для пользователя {user_id_str}: {e}")
+
+            await message.answer(
+                "Произошла ошибка при получении информации о команде. Пожалуйста, попробуйте позже."
             )

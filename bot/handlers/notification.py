@@ -37,26 +37,36 @@ async def send_notification(bot, notification, user):
     Returns:
         bool: True, если уведомление успешно отправлено, иначе False
     """
-    if not user.telegram_id:
-        logger.warning(f"Пользователь {user.id} не имеет привязанного Telegram ID")
+    # Извлекаем telegram_id из объекта или словаря
+    telegram_id = user.telegram_id if hasattr(user, 'telegram_id') else user.get('telegram_id')
+
+    if not telegram_id:
+        # Определяем user_id для логов
+        user_id = user.id if hasattr(user, 'id') else user.get('id', 'unknown')
+        logger.warning(f"Пользователь {user_id} не имеет привязанного Telegram ID")
         return False
 
     try:
-        # Изменено с metadata на metadata_json
-        metadata = json.loads(notification.metadata_json) if notification.metadata_json else {}
+        # Получаем metadata_json из объекта или словаря
+        metadata_json = notification.metadata_json if hasattr(notification, 'metadata_json') else notification.get(
+            'metadata_json')
+        metadata = json.loads(metadata_json) if metadata_json else {}
+
+        # Получаем тип уведомления
+        notification_type = notification.type if hasattr(notification, 'type') else notification.get('type')
 
         # Формируем текст сообщения в зависимости от типа уведомления
         message_text = ""
         markup = None
 
-        if notification.type == NotificationType.TEAM_APPLICATION:
+        if notification_type == NotificationType.TEAM_APPLICATION:
             message_text = TEAM_APPLICATION_MESSAGE.format(
                 team_name=metadata.get("team_name", ""),
                 championship_name=metadata.get("championship_name", ""),
                 application_deadline=metadata.get("application_deadline", "")
             )
 
-        elif notification.type == NotificationType.APPLICATION_CANCEL:
+        elif notification_type == NotificationType.APPLICATION_CANCEL:
             message_text = APPLICATION_CANCEL_MESSAGE.format(
                 status=metadata.get("status", "отклонена"),
                 team_name=metadata.get("team_name", ""),
@@ -64,14 +74,14 @@ async def send_notification(bot, notification, user):
                 reason=metadata.get("reason", "Причина не указана")
             )
 
-        elif notification.type == NotificationType.CHAMPIONSHIP_CANCEL:
+        elif notification_type == NotificationType.CHAMPIONSHIP_CANCEL:
             message_text = CHAMPIONSHIP_CANCEL_MESSAGE.format(
                 status=metadata.get("status", "отменен"),
                 championship_name=metadata.get("championship_name", ""),
                 additional_info=metadata.get("additional_info", "")
             )
 
-        elif notification.type == NotificationType.NEW_MATCH:
+        elif notification_type == NotificationType.NEW_MATCH:
             message_text = NEW_MATCH_MESSAGE.format(
                 championship_name=metadata.get("championship_name", ""),
                 opponent_name=metadata.get("opponent_name", ""),
@@ -81,7 +91,7 @@ async def send_notification(bot, notification, user):
                 address=metadata.get("address", "")
             )
 
-        elif notification.type == NotificationType.MATCH_RESCHEDULE:
+        elif notification_type == NotificationType.MATCH_RESCHEDULE:
             message_text = MATCH_RESCHEDULE_MESSAGE.format(
                 championship_name=metadata.get("championship_name", ""),
                 opponent_name=metadata.get("opponent_name", ""),
@@ -93,7 +103,7 @@ async def send_notification(bot, notification, user):
                 old_time=metadata.get("old_time", "")
             )
 
-        elif notification.type == NotificationType.PLAYOFF_RESULT:
+        elif notification_type == NotificationType.PLAYOFF_RESULT:
             message_text = PLAYOFF_RESULT_MESSAGE.format(
                 team_name=metadata.get("team_name", ""),
                 result=metadata.get("result", "прошла"),
@@ -101,7 +111,7 @@ async def send_notification(bot, notification, user):
                 additional_info=metadata.get("additional_info", "")
             )
 
-        elif notification.type == NotificationType.MATCH_REMINDER:
+        elif notification_type == NotificationType.MATCH_REMINDER:
             message_text = MATCH_REMINDER_MESSAGE.format(
                 championship_name=metadata.get("championship_name", ""),
                 opponent_name=metadata.get("opponent_name", ""),
@@ -111,7 +121,7 @@ async def send_notification(bot, notification, user):
                 address=metadata.get("address", "")
             )
 
-        elif notification.type == NotificationType.NEW_CHAMPIONSHIP:
+        elif notification_type == NotificationType.NEW_CHAMPIONSHIP:
             message_text = NEW_CHAMPIONSHIP_MESSAGE.format(
                 championship_name=metadata.get("championship_name", ""),
                 sport_type=metadata.get("sport_type", ""),
@@ -120,13 +130,13 @@ async def send_notification(bot, notification, user):
                 description=metadata.get("description", "")
             )
 
-        elif notification.type == NotificationType.COMMITTEE_MESSAGE:
+        elif notification_type == NotificationType.COMMITTEE_MESSAGE:
             message_text = COMMITTEE_MESSAGE.format(
                 championship_name=metadata.get("championship_name", ""),
                 message=metadata.get("message", "")
             )
 
-        elif notification.type == NotificationType.TEAM_INVITATION:
+        elif notification_type == NotificationType.TEAM_INVITATION:
             message_text = TEAM_INVITATION_MESSAGE.format(
                 team_name=metadata.get("team_name", ""),
                 sport_type=metadata.get("sport_type", ""),
@@ -136,7 +146,7 @@ async def send_notification(bot, notification, user):
             if invitation_id:
                 markup = get_invitation_keyboard(invitation_id, "team")
 
-        elif notification.type == NotificationType.COMMITTEE_INVITATION:
+        elif notification_type == NotificationType.COMMITTEE_INVITATION:
             message_text = COMMITTEE_INVITATION_MESSAGE.format(
                 committee_name=metadata.get("committee_name", ""),
                 inviter_name=metadata.get("inviter_name", "")
@@ -147,35 +157,43 @@ async def send_notification(bot, notification, user):
 
         else:
             # Если тип уведомления неизвестен, отправляем текст из уведомления
-            message_text = notification.content
+            content = notification.content if hasattr(notification, 'content') else notification.get('content', '')
+            message_text = content
 
         # Отправляем сообщение пользователю
         await bot.send_message(
-            chat_id=user.telegram_id,
+            chat_id=telegram_id,
             text=message_text,
             reply_markup=markup,
             parse_mode="HTML"
         )
 
         # Помечаем уведомление как отправленное
-        NotificationRepository.mark_as_sent(notification.id)
+        notification_id = notification.id if hasattr(notification, 'id') else notification.get('id')
+        if notification_id:
+            NotificationRepository.mark_as_sent(notification_id)
 
         return True
 
     except BotBlocked:
-        logger.warning(f"Бот заблокирован пользователем {user.id}")
+        user_id = user.id if hasattr(user, 'id') else user.get('id', 'unknown')
+        logger.warning(f"Бот заблокирован пользователем {user_id}")
         return False
     except ChatNotFound:
-        logger.warning(f"Чат с пользователем {user.id} не найден")
+        user_id = user.id if hasattr(user, 'id') else user.get('id', 'unknown')
+        logger.warning(f"Чат с пользователем {user_id} не найден")
         return False
     except UserDeactivated:
-        logger.warning(f"Пользователь {user.id} деактивировал свой аккаунт")
+        user_id = user.id if hasattr(user, 'id') else user.get('id', 'unknown')
+        logger.warning(f"Пользователь {user_id} деактивировал свой аккаунт")
         return False
     except TelegramAPIError as e:
-        logger.error(f"Ошибка Telegram API при отправке уведомления пользователю {user.id}: {e}")
+        user_id = user.id if hasattr(user, 'id') else user.get('id', 'unknown')
+        logger.error(f"Ошибка Telegram API при отправке уведомления пользователю {user_id}: {e}")
         return False
     except Exception as e:
-        logger.error(f"Необработанная ошибка при отправке уведомления пользователю {user.id}: {e}")
+        user_id = user.id if hasattr(user, 'id') else user.get('id', 'unknown')
+        logger.error(f"Необработанная ошибка при отправке уведомления пользователю {user_id}: {e}")
         return False
 
 
@@ -262,3 +280,135 @@ def register_notification_handlers(dp: Dispatcher):
             f"{callback_query.message.text}\n\n❌ Вы отклонили приглашение!",
             reply_markup=None
         )
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('accept_team_'))
+    async def accept_team_invitation(callback_query: types.CallbackQuery):
+        """
+        Обработчик для принятия приглашения в команду
+
+        Args:
+            callback_query: Запрос от кнопки
+        """
+        await callback_query.answer("Обрабатываем ваше решение...")
+
+        invitation_id = int(callback_query.data.split('_')[2])
+
+        try:
+            # Вызываем API для принятия приглашения
+            result = await api_client.accept_team_invitation(invitation_id)
+
+            if result.get('success'):
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n✅ Вы приняли приглашение! Вы теперь участник команды {result.get('team_name', '')}.",
+                    reply_markup=None
+                )
+            else:
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n❌ Не удалось принять приглашение: {result.get('error', 'неизвестная ошибка')}",
+                    reply_markup=None
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при принятии приглашения в команду {invitation_id}: {e}")
+            await callback_query.message.edit_text(
+                f"{callback_query.message.text}\n\n❌ Произошла ошибка при обработке приглашения. Пожалуйста, попробуйте позже.",
+                reply_markup=None
+            )
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('decline_team_'))
+    async def decline_team_invitation(callback_query: types.CallbackQuery):
+        """
+        Обработчик для отклонения приглашения в команду
+
+        Args:
+            callback_query: Запрос от кнопки
+        """
+        await callback_query.answer("Обрабатываем ваше решение...")
+
+        invitation_id = int(callback_query.data.split('_')[2])
+
+        try:
+            # Вызываем API для отклонения приглашения
+            result = await api_client.decline_team_invitation(invitation_id)
+
+            if result.get('success'):
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n❌ Вы отклонили приглашение.",
+                    reply_markup=None
+                )
+            else:
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n❌ Не удалось отклонить приглашение: {result.get('error', 'неизвестная ошибка')}",
+                    reply_markup=None
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при отклонении приглашения в команду {invitation_id}: {e}")
+            await callback_query.message.edit_text(
+                f"{callback_query.message.text}\n\n❌ Произошла ошибка при обработке приглашения. Пожалуйста, попробуйте позже.",
+                reply_markup=None
+            )
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('accept_committee_'))
+    async def accept_committee_invitation(callback_query: types.CallbackQuery):
+        """
+        Обработчик для принятия приглашения в оргкомитет
+
+        Args:
+            callback_query: Запрос от кнопки
+        """
+        await callback_query.answer("Обрабатываем ваше решение...")
+
+        invitation_id = int(callback_query.data.split('_')[2])
+
+        try:
+            # Вызываем API для принятия приглашения
+            result = await api_client.accept_committee_invitation(invitation_id)
+
+            if result.get('success'):
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n✅ Вы приняли приглашение! Вы теперь член оргкомитета {result.get('committee_name', '')}.",
+                    reply_markup=None
+                )
+            else:
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n❌ Не удалось принять приглашение: {result.get('error', 'неизвестная ошибка')}",
+                    reply_markup=None
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при принятии приглашения в оргкомитет {invitation_id}: {e}")
+            await callback_query.message.edit_text(
+                f"{callback_query.message.text}\n\n❌ Произошла ошибка при обработке приглашения. Пожалуйста, попробуйте позже.",
+                reply_markup=None
+            )
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('decline_committee_'))
+    async def decline_committee_invitation(callback_query: types.CallbackQuery):
+        """
+        Обработчик для отклонения приглашения в оргкомитет
+
+        Args:
+            callback_query: Запрос от кнопки
+        """
+        await callback_query.answer("Обрабатываем ваше решение...")
+
+        invitation_id = int(callback_query.data.split('_')[2])
+
+        try:
+            # Вызываем API для отклонения приглашения
+            result = await api_client.decline_committee_invitation(invitation_id)
+
+            if result.get('success'):
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n❌ Вы отклонили приглашение.",
+                    reply_markup=None
+                )
+            else:
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n❌ Не удалось отклонить приглашение: {result.get('error', 'неизвестная ошибка')}",
+                    reply_markup=None
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при отклонении приглашения в оргкомитет {invitation_id}: {e}")
+            await callback_query.message.edit_text(
+                f"{callback_query.message.text}\n\n❌ Произошла ошибка при обработке приглашения. Пожалуйста, попробуйте позже.",
+                reply_markup=None
+            )

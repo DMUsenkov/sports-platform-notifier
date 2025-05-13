@@ -158,6 +158,81 @@ class NotificationRepository:
         Returns:
             Количество созданных уведомлений
         """
-        # Примечание: Это заглушка, в реальном приложении здесь будет логика
-        # для получения информации о матчах из основного приложения через API
-        return 0
+        try:
+            from api.client import ApiClient
+            import asyncio
+            from datetime import datetime, timedelta
+            import json
+
+            # Создаем клиент для взаимодействия с API
+            api_client = ApiClient()
+
+            # Получаем матчи на ближайшие 2 дня
+            # Запускаем асинхронный код в синхронном контексте
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                # Получаем матчи на ближайшие 2 дня
+                matches = loop.run_until_complete(api_client.get_upcoming_matches(days=2))
+
+                # Фильтруем матчи, которые будут через 24 часа
+                tomorrow = datetime.now() + timedelta(days=1)
+                tomorrow_start = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0, 0)
+                tomorrow_end = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 59, 59)
+
+                tomorrow_matches = []
+                for match in matches:
+                    # Предполагается, что в матче есть поле date_time в ISO формате
+                    if 'date_time' in match:
+                        match_date_time = datetime.fromisoformat(match['date_time'])
+                        if tomorrow_start <= match_date_time <= tomorrow_end:
+                            tomorrow_matches.append(match)
+
+                # Создаем уведомления для каждого участника матча
+                notifications_count = 0
+
+                with get_db_session() as session:
+                    for match in tomorrow_matches:
+                        # Получаем информацию о командах
+                        team1 = loop.run_until_complete(api_client.get_team_details(match['team1_id']))
+                        team2 = loop.run_until_complete(api_client.get_team_details(match['team2_id']))
+
+                        # Создаем уведомления для участников обеих команд
+                        for team, opponent in [(team1, team2), (team2, team1)]:
+                            for member in team.get('members', []):
+                                user = session.query(User).filter(User.id == member['user_id']).first()
+
+                                if user and user.is_active and user.telegram_id:
+                                    # Формируем метаданные для уведомления
+                                    metadata = {
+                                        'championship_name': match.get('tournament_name', ''),
+                                        'opponent_name': opponent.get('name', ''),
+                                        'match_date': match.get('date', '').split('T')[0] if 'date' in match else '',
+                                        'match_time': match.get('time', ''),
+                                        'venue': match.get('location_name', ''),
+                                        'address': match.get('location_address', '')
+                                    }
+
+                                    # Создаем уведомление
+                                    notification = Notification(
+                                        user_id=user.id,
+                                        type=NotificationType.MATCH_REMINDER,
+                                        title="Напоминание о матче",
+                                        content=f"Завтра у вашей команды матч в {match.get('time', '')}",
+                                        metadata_json=json.dumps(metadata)
+                                    )
+
+                                    session.add(notification)
+                                    notifications_count += 1
+
+                logger.info(f"Создано {notifications_count} напоминаний о матчах")
+                return notifications_count
+
+            finally:
+                # Закрываем event loop
+                loop.close()
+
+        except Exception as e:
+            logger.error(f"Ошибка при создании напоминаний о матчах: {e}")
+            return 0
