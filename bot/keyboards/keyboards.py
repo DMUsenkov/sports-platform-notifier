@@ -57,9 +57,21 @@ def get_invitation_keyboard(invitation_id: int, invitation_type: str) -> InlineK
         InlineKeyboardMarkup: Клавиатура с кнопками принятия или отказа от приглашения
     """
     keyboard = InlineKeyboardMarkup(row_width=2)
+
+    # Преобразуем invitation_id в строку для создания callback_data
+    invitation_id_str = str(invitation_id)
+
+    # Создаем callback_data
+    accept_callback = f"accept_{invitation_type}_{invitation_id_str}"
+    decline_callback = f"decline_{invitation_type}_{invitation_id_str}"
+
+    # Логирование для отладки
+    print(f"Creating keyboard with accept callback: {accept_callback}")
+    print(f"Creating keyboard with decline callback: {decline_callback}")
+
     keyboard.add(
-        InlineKeyboardButton("Принять", callback_data=f"accept_{invitation_type}_{invitation_id}"),
-        InlineKeyboardButton("Отклонить", callback_data=f"decline_{invitation_type}_{invitation_id}")
+        InlineKeyboardButton("Принять", callback_data=accept_callback),
+        InlineKeyboardButton("Отклонить", callback_data=decline_callback)
     )
     return keyboard
 

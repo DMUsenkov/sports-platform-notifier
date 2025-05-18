@@ -1,8 +1,7 @@
-import logging
-import re
 from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 from utils.logger import get_logger
 from database.repositories.user_repository import UserRepository
@@ -12,14 +11,11 @@ from bot.messages.templates import (
     PHONE_LINKED_MESSAGE,
     PHONE_NOT_FOUND_MESSAGE,
     PHONE_LINK_ERROR_MESSAGE,
-    INVALID_PHONE_FORMAT_MESSAGE
+    INVALID_PHONE_FORMAT_MESSAGE,
+    TEAM_INVITATION_MESSAGE,
+    COMMITTEE_INVITATION_MESSAGE
 )
-from bot.keyboards.keyboards import (
-    get_phone_keyboard,
-    get_start_keyboard,
-    get_help_keyboard,
-    get_match_actions_keyboard
-)
+from bot.keyboards.keyboards import get_phone_keyboard, get_start_keyboard, get_help_keyboard
 
 logger = get_logger("user_handler")
 
@@ -190,8 +186,11 @@ def register_user_handlers(dp: Dispatcher):
                 "Произошла ошибка при получении информации о матчах. Пожалуйста, попробуйте позже."
             )
 
-    @dp.message_handler(commands=['invitations'])
+    # Обновим функцию my_invitations в bot/handlers/user.py
+
+    # Обработчик для просмотра приглашений
     @dp.message_handler(lambda message: message.text == "Приглашения")
+    @dp.message_handler(commands=['invitations'])
     async def my_invitations(message: types.Message):
         """
         Обработчик запроса информации о приглашениях пользователя
@@ -207,65 +206,158 @@ def register_user_handlers(dp: Dispatcher):
             return
 
         try:
-            # Получаем ID пользователя
-            user_id = user.id if hasattr(user, 'id') else user.get('id')
+            # Отправляем информационное сообщение о поиске приглашений
+            await message.answer("Ищем ваши приглашения...")
 
-            if not user_id:
+            # Получаем ID пользователя
+            user_id = user.id if hasattr(user, 'id') else user['id'] if isinstance(user,
+                                                                                   dict) and 'id' in user else None
+            if user_id is None:
+                logger.error("Не удалось определить ID пользователя")
+                raise ValueError("Не удалось определить ID пользователя")
+
+            # Получаем список приглашений пользователя через API
+            logger.info(f"Запрашиваем приглашения для пользователя {user_id}")
+            invitations = await api_client.get_user_invitations(user_id)
+            logger.info(f"Получен ответ API: {invitations}")
+
+            # Проверяем, есть ли приглашения
+            if invitations is None:
+                logger.warning("API вернул None вместо списка приглашений")
                 await message.answer(
-                    "Не удалось определить ID пользователя. Пожалуйста, попробуйте заново привязать аккаунт, отправив /start."
+                    "Не удалось загрузить приглашения. Пожалуйста, попробуйте позже.",
+                    reply_markup=get_start_keyboard()
                 )
                 return
 
-            # Получаем список приглашений пользователя через API
-            invitations = await api_client.get_user_invitations(user_id)
-
-            if not invitations:
-                await message.answer("У вас нет активных приглашений.")
+            if not isinstance(invitations, list):
+                logger.warning(f"API вернул не список: {type(invitations)}")
+                await message.answer(
+                    "Получены некорректные данные. Пожалуйста, попробуйте позже.",
+                    reply_markup=get_start_keyboard()
+                )
                 return
 
-            has_sent_invitations = False
+            if len(invitations) == 0:
+                logger.info("Список приглашений пуст")
+                await message.answer(
+                    "У вас нет активных приглашений.",
+                    reply_markup=get_start_keyboard()
+                )
+                return
 
-            # Отправляем отдельные сообщения для каждого приглашения с кнопками
-            for invitation in invitations:
-                if invitation['type'] == 'team':
-                    # Создаем клавиатуру для этого приглашения
-                    markup = get_invitation_keyboard(invitation['invitation_id'], "team")
+            # Сообщаем о количестве найденных приглашений
+            logger.info(f"Найдено {len(invitations)} приглашений")
+            await message.answer(
+                f"📨 Найдено {len(invitations)} приглашений:",
+                reply_markup=get_start_keyboard()
+            )
 
-                    # Отправляем отдельное сообщение для каждого приглашения в команду
+            # Обрабатываем каждое приглашение
+            count_sent = 0
+            for i, invitation in enumerate(invitations):
+                try:
+                    logger.info(f"Обработка приглашения {i + 1}/{len(invitations)}: {invitation}")
+
+                    # Проверяем наличие необходимых полей
+                    if not isinstance(invitation, dict):
+                        logger.warning(f"Приглашение не является словарем: {invitation}")
+                        continue
+
+                    invitation_type = invitation.get('type')
+                    invitation_id = invitation.get('invitation_id', invitation.get('id'))
+
+                    logger.info(f"Тип: {invitation_type}, ID: {invitation_id}")
+
+                    if not invitation_type:
+                        logger.warning(f"Отсутствует тип приглашения: {invitation}")
+                        continue
+
+                    if not invitation_id:
+                        logger.warning(f"Отсутствует ID приглашения: {invitation}")
+                        continue
+
+                    # Готовим текст сообщения в зависимости от типа приглашения
+                    message_text = ""
+                    if invitation_type == 'team':
+                        team_name = invitation.get('team_name', 'Неизвестная команда')
+                        sport = invitation.get('sport', 'Не указан')
+                        captain_name = invitation.get('inviter_name', 'Неизвестный капитан')
+
+                        message_text = f"""
+    👥 <b>Приглашение в команду!</b>
+
+    Вас приглашают в команду "<b>{team_name}</b>"!
+    Вид спорта: {sport}
+
+    Капитан: {captain_name}
+    """
+                    elif invitation_type == 'committee':
+                        committee_name = invitation.get('committee_name', 'Неизвестный оргкомитет')
+                        inviter_name = invitation.get('inviter_name', 'Неизвестный организатор')
+
+                        message_text = f"""
+    👔 <b>Приглашение в оргкомитет!</b>
+
+    Вас приглашают в оргкомитет "<b>{committee_name}</b>"!
+
+    Пригласил: {inviter_name}
+    """
+                    else:
+                        logger.warning(f"Неизвестный тип приглашения: {invitation_type}")
+                        continue
+
+                    # Создаем простые callback_data с минимальной информацией
+                    accept_callback = f"accept_{invitation_type}_{invitation_id}"
+                    decline_callback = f"decline_{invitation_type}_{invitation_id}"
+
+                    # Проверяем длину callback_data
+                    if len(accept_callback) > 64 or len(decline_callback) > 64:
+                        logger.warning(
+                            f"callback_data слишком длинный: {len(accept_callback)}/{len(decline_callback)} символов")
+                        # Обрезаем, если нужно
+                        if len(accept_callback) > 64:
+                            accept_callback = accept_callback[:64]
+                        if len(decline_callback) > 64:
+                            decline_callback = decline_callback[:64]
+
+                    # Создаем клавиатуру с кнопками
+                    markup = types.InlineKeyboardMarkup(row_width=2)
+                    accept_button = types.InlineKeyboardButton("Принять", callback_data=accept_callback)
+                    decline_button = types.InlineKeyboardButton("Отклонить", callback_data=decline_callback)
+                    markup.add(accept_button, decline_button)
+
+                    logger.info(
+                        f"Отправляем сообщение с клавиатурой. Accept callback: {accept_callback}, Decline callback: {decline_callback}")
+
+                    # Отправляем сообщение с клавиатурой
                     await message.answer(
-                        TEAM_INVITATION_MESSAGE.format(
-                            team_name=invitation.get('team_name', ''),
-                            sport_type=invitation.get('sport', ''),
-                            captain_name=invitation.get('inviter_name', '')
-                        ),
-                        reply_markup=markup
+                        text=message_text,
+                        reply_markup=markup,
+                        parse_mode="HTML"
                     )
-                    has_sent_invitations = True
+                    count_sent += 1
+                    logger.info(f"Приглашение {i + 1} успешно отправлено")
 
-                elif invitation['type'] == 'committee':
-                    # Создаем клавиатуру для этого приглашения
-                    markup = get_invitation_keyboard(invitation['invitation_id'], "committee")
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке приглашения {i + 1}: {e}", exc_info=True)
+                    # Продолжаем обработку других приглашений
 
-                    # Отправляем отдельное сообщение для каждого приглашения в оргкомитет
-                    await message.answer(
-                        COMMITTEE_INVITATION_MESSAGE.format(
-                            committee_name=invitation.get('committee_name', ''),
-                            inviter_name=invitation.get('inviter_name', '')
-                        ),
-                        reply_markup=markup
-                    )
-                    has_sent_invitations = True
-
-            if not has_sent_invitations:
-                await message.answer("У вас нет активных приглашений.")
+            # Если не удалось отправить ни одного приглашения
+            if count_sent == 0:
+                logger.warning("Не удалось отправить ни одного приглашения")
+                await message.answer(
+                    "Не удалось загрузить информацию о приглашениях. Пожалуйста, попробуйте позже.",
+                    reply_markup=get_start_keyboard()
+                )
+            else:
+                logger.info(f"Успешно отправлено {count_sent} из {len(invitations)} приглашений")
 
         except Exception as e:
-            # Безопасное логирование
-            user_id_str = str(user.id if hasattr(user, 'id') else user.get('id', 'unknown'))
-            logger.error(f"Ошибка при получении приглашений пользователя {user_id_str}: {e}")
-
+            logger.error(f"Ошибка при получении приглашений пользователя: {e}", exc_info=True)
             await message.answer(
-                "Произошла ошибка при получении информации о приглашениях. Пожалуйста, попробуйте позже."
+                "Произошла ошибка при получении информации о приглашениях. Пожалуйста, попробуйте позже.",
+                reply_markup=get_start_keyboard()
             )
 
     @dp.message_handler(lambda message: message.text == "Мои чемпионаты")
@@ -334,6 +426,7 @@ def register_user_handlers(dp: Dispatcher):
                 "Произошла ошибка при получении информации о чемпионатах. Пожалуйста, попробуйте позже."
             )
 
+    # Обновленный обработчик запроса "Мои команды"
     @dp.message_handler(lambda message: message.text == "Мои команды")
     async def my_teams(message: types.Message):
         """
@@ -350,16 +443,12 @@ def register_user_handlers(dp: Dispatcher):
             return
 
         try:
-            # Получаем ID пользователя
-            user_id = user.id if hasattr(user, 'id') else user.get('id')
-
-            if not user_id:
-                await message.answer(
-                    "Не удалось определить ID пользователя. Пожалуйста, попробуйте заново привязать аккаунт, отправив /start."
-                )
-                return
-
             # Получаем список команд пользователя через API
+            user_id = user.id if hasattr(user, 'id') else user['id'] if isinstance(user,
+                                                                                   dict) and 'id' in user else None
+            if user_id is None:
+                raise ValueError("Не удалось определить ID пользователя")
+
             teams = await api_client.get_user_teams(user_id)
 
             if not teams:
@@ -370,27 +459,30 @@ def register_user_handlers(dp: Dispatcher):
             response = "👥 Ваши команды:\n\n"
 
             for team in teams:
-                response += f"*{team['name']}*\n"
-                response += f"⚽ Вид спорта: {team['sport']}\n"
+                response += f"<b>{team.get('name', 'Без названия')}</b>\n"
+                response += f"⚽ Вид спорта: {team.get('sport', 'Не указан')}\n"
 
                 if team.get('is_captain', False):
                     response += "👑 Вы капитан этой команды\n"
 
+                # Добавляем команду для просмотра деталей с правильным ID
+                team_id = team.get('id', team.get('team_id', ''))
+                if team_id:
+                    response += f"Для просмотра подробной информации: /team_{team_id}\n"
+
                 response += "\n"
 
-            # Добавляем инструкцию по просмотру деталей команды
-            response += "Чтобы просмотреть подробную информацию о команде, отправьте /team_<id>, например /team_123"
+            # Добавляем инструкцию с правильным форматом команды
+            response += "Чтобы просмотреть подробную информацию о команде, отправьте /team_ID (например, /team_123)"
 
-            # Отправляем сообщение с форматированием Markdown
-            await message.answer(response, parse_mode="Markdown")
+            # Отправляем сообщение с форматированием HTML
+            await message.answer(response, parse_mode="HTML")
 
         except Exception as e:
-            # Безопасное логирование
-            user_id_str = str(user.id if hasattr(user, 'id') else user.get('id', 'unknown'))
-            logger.error(f"Ошибка при получении команд пользователя {user_id_str}: {e}")
-
+            logger.error(f"Ошибка при получении команд пользователя: {e}")
             await message.answer(
-                "Произошла ошибка при получении информации о командах. Пожалуйста, попробуйте позже."
+                "Произошла ошибка при получении информации о командах. Пожалуйста, попробуйте позже.",
+                reply_markup=get_start_keyboard()
             )
 
     # Обработчики колбэков для меню помощи
@@ -575,7 +667,8 @@ def register_user_handlers(dp: Dispatcher):
                 reply_markup=get_phone_keyboard()
             )
 
-    @dp.message_handler(lambda message: message.text.startswith('/team_'))
+    # Обработчик для команды /team_ID и /teamID
+    @dp.message_handler(lambda message: re.match(r'/team_?\d+', message.text))
     async def team_details(message: types.Message):
         """
         Обработчик запроса информации о конкретной команде
@@ -591,41 +684,72 @@ def register_user_handlers(dp: Dispatcher):
             return
 
         try:
-            # Извлекаем ID команды из команды
-            team_id = int(message.text.split('_')[1])
+            # Сообщаем пользователю, что идет загрузка данных
+            wait_message = await message.answer("Загружаем информацию о команде...")
+
+            # Извлекаем ID команды из команды (поддержка обоих форматов /team_ID и /teamID)
+            command_text = message.text
+            if '_' in command_text:
+                team_id = int(command_text.split('_')[1])
+            else:
+                # Формат /teamXXX без подчеркивания
+                team_id = int(command_text[5:])
+
+            # Получаем ID пользователя
+            user_id = user.id if hasattr(user, 'id') else user['id'] if isinstance(user,
+                                                                                   dict) and 'id' in user else None
+            if user_id is None:
+                raise ValueError("Не удалось определить ID пользователя")
 
             # Получаем детальную информацию о команде через API
             team = await api_client.get_team_details(team_id)
 
-            if not team:
+            # Проверяем, получены ли данные
+            if not team or not isinstance(team, dict):
                 await message.answer("Команда не найдена или у вас нет доступа к ней.")
                 return
 
-            # Формируем сообщение с информацией о команде
-            response = f"👥 *{team['name']}*\n\n"
-            response += f"⚽ Вид спорта: {team['sport']}\n"
-            response += f"👨‍👩‍👧‍👦 Участников: {team['count_member']}\n"
-            response += f"🏆 Побед: {team.get('wins', 0)}\n"
-            response += f"❌ Поражений: {team.get('loss', 0)}\n\n"
+            # Подготовка данных
+            name = team.get('name', 'Без названия')
+            sport = team.get('sport', 'Не указан')
+            count_member = team.get('count_member', 0)
+            wins = team.get('wins', 0)
+            loss = team.get('loss', 0)
+            members = team.get('members', [])
+
+            # Формируем ответ в формате HTML
+            response = f"👥 <b>{name}</b>\n\n"
+            response += f"⚽ Вид спорта: {sport}\n"
+            response += f"👨‍👩‍👧‍👦 Участников: {count_member}\n"
+            response += f"🏆 Побед: {wins}\n"
+            response += f"❌ Поражений: {loss}\n\n"
 
             # Список участников команды
-            response += "👥 *Состав команды:*\n"
-            for member in team.get('members', []):
-                name = f"{member['first_name']} {member['last_name']}"
-                if member.get('is_captain', False):
-                    name += " 👑"
-                response += f"- {name}\n"
+            if members:
+                response += "<b>Состав команды:</b>\n"
+                for member in members:
+                    member_name = f"{member.get('first_name', '')} {member.get('last_name', '')}"
+                    if member.get('is_captain', False):
+                        member_name += " 👑"
+                    response += f"- {member_name}\n"
 
-            # Отправляем сообщение с форматированием Markdown
-            await message.answer(response, parse_mode="Markdown")
+            # Отправляем сообщение с форматированием HTML
+            await message.answer(response, parse_mode="HTML")
 
-        except ValueError:
-            await message.answer("Неверный формат команды. Используйте /team_<id>, например /team_123")
         except Exception as e:
-            # Безопасное логирование
-            user_id_str = str(user.id if hasattr(user, 'id') else user.get('id', 'unknown'))
-            logger.error(f"Ошибка при получении информации о команде для пользователя {user_id_str}: {e}")
+            logger.error(f"Ошибка при получении информации о команде: {e}")
+
+            # Пробуем отправить более информативное сообщение об ошибке
+            error_message = "Произошла ошибка при получении информации о команде."
+
+            # Если ошибка в API
+            if hasattr(e, 'response') and hasattr(e.response, 'status'):
+                if e.response.status == 404:
+                    error_message = "Команда не найдена."
+                elif e.response.status == 403:
+                    error_message = "У вас нет доступа к информации об этой команде."
 
             await message.answer(
-                "Произошла ошибка при получении информации о команде. Пожалуйста, попробуйте позже."
+                f"{error_message} Пожалуйста, попробуйте позже.",
+                reply_markup=get_start_keyboard()
             )

@@ -15,6 +15,7 @@ from bot.handlers.notification import register_notification_handlers, process_pe
 from bot.handlers.match import register_match_handlers  # Новый импорт
 from bot.handlers.championship import register_championship_handlers  # Новый импорт
 from database.repositories.notification_repository import NotificationRepository
+from bot.handlers.callback_handlers import register_callback_handlers
 
 # Настройка логирования
 logger = setup_logger("bot")
@@ -25,10 +26,15 @@ storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
 # Регистрация обработчиков
+# Обновление в bot/main.py
+
+# Добавим импорт
+
 register_user_handlers(dp)
 register_notification_handlers(dp)
-register_match_handlers(dp)  # Регистрация новых обработчиков
-register_championship_handlers(dp)  # Регистрация новых обработчиков
+register_match_handlers(dp)
+register_championship_handlers(dp)
+register_callback_handlers(dp)  # Добавляем новую регистрацию
 
 # Флаг для контроля фоновых задач
 background_tasks_running = False
