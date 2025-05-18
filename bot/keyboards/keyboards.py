@@ -1,6 +1,5 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
-
 def get_phone_keyboard() -> ReplyKeyboardMarkup:
     """
     Клавиатура для запроса номера телефона
@@ -12,7 +11,6 @@ def get_phone_keyboard() -> ReplyKeyboardMarkup:
     keyboard.add(KeyboardButton("Отправить номер телефона", request_contact=True))
     return keyboard
 
-
 def get_start_keyboard() -> ReplyKeyboardMarkup:
     """
     Основная клавиатура для работы с ботом
@@ -23,10 +21,9 @@ def get_start_keyboard() -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(KeyboardButton("Мои матчи"))
     keyboard.add(KeyboardButton("Мои чемпионаты"), KeyboardButton("Мои команды"))
-    keyboard.add(KeyboardButton("Рекомендуемые чемпионаты"), KeyboardButton("Приглашения"))
+    keyboard.add(KeyboardButton("Приглашения"))
     keyboard.add(KeyboardButton("Помощь"))
     return keyboard
-
 
 def get_help_keyboard() -> InlineKeyboardMarkup:
     """
@@ -37,13 +34,12 @@ def get_help_keyboard() -> InlineKeyboardMarkup:
     """
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
-        InlineKeyboardButton("О боте", callback_data="help_about"),
-        InlineKeyboardButton("Типы уведомлений", callback_data="help_notification_types"),
-        InlineKeyboardButton("Как привязать другой номер", callback_data="help_change_phone"),
-        InlineKeyboardButton("Связаться с поддержкой", callback_data="help_support")
+        InlineKeyboardButton("О боте", callback_data="about"),
+        InlineKeyboardButton("Типы уведомлений", callback_data="types"),
+        InlineKeyboardButton("Как привязать другой номер", callback_data="phone"),
+        InlineKeyboardButton("Связаться с поддержкой", callback_data="support")
     )
     return keyboard
-
 
 def get_invitation_keyboard(invitation_id: int, invitation_type: str) -> InlineKeyboardMarkup:
     """
@@ -57,23 +53,12 @@ def get_invitation_keyboard(invitation_id: int, invitation_type: str) -> InlineK
         InlineKeyboardMarkup: Клавиатура с кнопками принятия или отказа от приглашения
     """
     keyboard = InlineKeyboardMarkup(row_width=2)
-
-    # Преобразуем invitation_id в строку для создания callback_data
-    invitation_id_str = str(invitation_id)
-
-    # Создаем callback_data
-    accept_callback = f"accept_{invitation_type}_{invitation_id_str}"
-    decline_callback = f"decline_{invitation_type}_{invitation_id_str}"
-
-    # Логирование для отладки
-    print(f"Creating keyboard with accept callback: {accept_callback}")
-    print(f"Creating keyboard with decline callback: {decline_callback}")
-
     keyboard.add(
-        InlineKeyboardButton("Принять", callback_data=accept_callback),
-        InlineKeyboardButton("Отклонить", callback_data=decline_callback)
+        InlineKeyboardButton("Принять", callback_data=f"accept_{invitation_type}_{invitation_id}"),
+        InlineKeyboardButton("Отклонить", callback_data=f"decline_{invitation_type}_{invitation_id}")
     )
     return keyboard
+
 
 
 def get_match_actions_keyboard(match_id: int, team_id: int) -> InlineKeyboardMarkup:

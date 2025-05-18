@@ -208,7 +208,11 @@ class ApiClient:
         Returns:
             Результат операции
         """
-        return await self._make_request("POST", f"invitations/team/{invitation_id}/accept")
+        # Добавляем отладочный лог
+        print(f"Вызов API метода accept_team_invitation с ID={invitation_id}")
+        result = await self._make_request("POST", f"invitations/team/{invitation_id}/accept")
+        print(f"Результат API метода accept_team_invitation: {result}")
+        return result
 
     async def decline_team_invitation(self, invitation_id: int) -> Dict[str, Any]:
         """
@@ -220,7 +224,11 @@ class ApiClient:
         Returns:
             Результат операции
         """
-        return await self._make_request("POST", f"invitations/team/{invitation_id}/decline")
+        # Добавляем отладочный лог
+        print(f"Вызов API метода decline_team_invitation с ID={invitation_id}")
+        result = await self._make_request("POST", f"invitations/team/{invitation_id}/decline")
+        print(f"Результат API метода decline_team_invitation: {result}")
+        return result
 
     async def accept_committee_invitation(self, invitation_id: int) -> Dict[str, Any]:
         """
@@ -232,7 +240,11 @@ class ApiClient:
         Returns:
             Результат операции
         """
-        return await self._make_request("POST", f"invitations/committee/{invitation_id}/accept")
+        # Добавляем отладочный лог
+        print(f"Вызов API метода accept_committee_invitation с ID={invitation_id}")
+        result = await self._make_request("POST", f"invitations/committee/{invitation_id}/accept")
+        print(f"Результат API метода accept_committee_invitation: {result}")
+        return result
 
     async def decline_committee_invitation(self, invitation_id: int) -> Dict[str, Any]:
         """
@@ -244,7 +256,11 @@ class ApiClient:
         Returns:
             Результат операции
         """
-        return await self._make_request("POST", f"invitations/committee/{invitation_id}/decline")
+        # Добавляем отладочный лог
+        print(f"Вызов API метода decline_committee_invitation с ID={invitation_id}")
+        result = await self._make_request("POST", f"invitations/committee/{invitation_id}/decline")
+        print(f"Результат API метода decline_committee_invitation: {result}")
+        return result
 
     async def get_user_invitations(self, user_id: int, type: str = "all") -> List[Dict[str, Any]]:
         """

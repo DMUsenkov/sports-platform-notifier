@@ -1,5 +1,3 @@
-# Обновление bot/main.py
-
 import asyncio
 import logging
 import sys
@@ -12,10 +10,11 @@ from utils.logger import setup_logger
 from database.connection import init_db
 from bot.handlers.user import register_user_handlers
 from bot.handlers.notification import register_notification_handlers, process_pending_notifications
-from bot.handlers.match import register_match_handlers  # Новый импорт
-from bot.handlers.championship import register_championship_handlers  # Новый импорт
-from database.repositories.notification_repository import NotificationRepository
+from bot.handlers.match import register_match_handlers
+from bot.handlers.championship import register_championship_handlers
 from bot.handlers.callback_handlers import register_callback_handlers
+
+from database.repositories.notification_repository import NotificationRepository
 
 # Настройка логирования
 logger = setup_logger("bot")
@@ -26,19 +25,14 @@ storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
 # Регистрация обработчиков
-# Обновление в bot/main.py
-
-# Добавим импорт
-
+register_callback_handlers(dp)  # Важно: регистрируем первыми для приоритетной обработки колбэков
 register_user_handlers(dp)
 register_notification_handlers(dp)
 register_match_handlers(dp)
 register_championship_handlers(dp)
-register_callback_handlers(dp)  # Добавляем новую регистрацию
 
 # Флаг для контроля фоновых задач
 background_tasks_running = False
-
 
 # Асинхронная функция для периодической проверки уведомлений
 async def check_notifications_periodically():
@@ -63,7 +57,6 @@ async def check_notifications_periodically():
 
         # Ждем 10 секунд перед следующей проверкой
         await asyncio.sleep(10)
-
 
 async def on_startup(dispatcher):
     """
@@ -90,7 +83,6 @@ async def on_startup(dispatcher):
         logger.error(f"Ошибка при запуске бота: {e}")
         sys.exit(1)
 
-
 async def on_shutdown(dispatcher):
     """
     Функция, выполняемая при остановке бота
@@ -115,12 +107,11 @@ async def on_shutdown(dispatcher):
     except Exception as e:
         logger.error(f"Ошибка при остановке бота: {e}")
 
-
 if __name__ == '__main__':
-    # Запуск бота
     executor.start_polling(
         dp,
         on_startup=on_startup,
         on_shutdown=on_shutdown,
-        skip_updates=True
+        skip_updates=True,
+        allowed_updates=['message', 'callback_query']
     )

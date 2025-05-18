@@ -1,133 +1,188 @@
-# Новый файл bot/handlers/callback_handlers.py
 import logging
 from aiogram import Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from utils.logger import get_logger
-from database.repositories.user_repository import UserRepository
 from api.client import ApiClient
 
 logger = get_logger("callback_handlers")
-api_client = None  # Будет инициализирован при регистрации обработчиков
+api_client = None
 
 
 def register_callback_handlers(dp: Dispatcher):
     """
-    Регистрация обработчиков для всех колбэков
+    Регистрация обработчиков для колбэков инлайн-кнопок
 
     Args:
         dp: Диспетчер Aiogram
     """
     global api_client
-    from api.client import ApiClient
     api_client = ApiClient()
 
-    # Общий обработчик для всех типов колбэков
-    @dp.callback_query_handler(lambda c: True)
-    async def process_callback_query(callback_query: types.CallbackQuery):
-        """
-        Общий обработчик всех callback queries
+    # Обработчики для меню помощи
+    @dp.callback_query_handler(lambda c: c.data == 'about')
+    async def help_about_callback(callback_query: types.CallbackQuery):
+        await callback_query.answer()
+        await callback_query.message.reply(
+            "О боте:\n\n"
+            "Этот бот предназначен для отправки уведомлений пользователям онлайн-платформы "
+            "для поиска и управления любительскими спортивными соревнованиями.\n\n"
+            "Через этот бот вы будете получать актуальную информацию о чемпионатах, "
+            "матчах и командах, в которых вы участвуете."
+        )
 
-        Args:
-            callback_query: Callback query от пользователя
-        """
-        callback_data = callback_query.data
-        logger.info(f"Получен callback query с данными: {callback_data}")
+    @dp.callback_query_handler(lambda c: c.data == 'types')
+    async def help_notification_types_callback(callback_query: types.CallbackQuery):
+        await callback_query.answer()
+        await callback_query.message.reply(
+            "Типы уведомлений:\n\n"
+            "• Заявки на участие в чемпионатах\n"
+            "• Отмена или отклонение заявок\n"
+            "• Отмена или завершение чемпионатов\n"
+            "• Назначение новых матчей\n"
+            "• Перенос матчей\n"
+            "• Результаты прохождения в плей-офф\n"
+            "• Напоминания о матчах\n"
+            "• Новые интересные чемпионаты\n"
+            "• Сообщения от оргкомитетов\n"
+            "• Приглашения в команды\n"
+            "• Приглашения в оргкомитеты"
+        )
 
-        # Проверяем, что callback_data существует
-        if not callback_data:
-            logger.warning("Получен пустой callback_data")
-            await callback_query.answer("Ошибка: пустой callback_data")
-            return
+    @dp.callback_query_handler(lambda c: c.data == 'phone')
+    async def help_change_phone_callback(callback_query: types.CallbackQuery):
+        await callback_query.answer()
+        await callback_query.message.reply(
+            "Как привязать другой номер телефона:\n\n"
+            "1. Отправьте команду /changephone\n"
+            "2. Введите новый номер телефона или отправьте контакт\n"
+            "3. Ваш аккаунт будет привязан к новому номеру телефона\n\n"
+            "Обратите внимание, что номер телефона должен быть зарегистрирован в системе."
+        )
 
-        # Разбираем callback_data
+    @dp.callback_query_handler(lambda c: c.data == 'support')
+    async def help_support_callback(callback_query: types.CallbackQuery):
+        await callback_query.answer()
+        await callback_query.message.reply(
+            "Связаться с поддержкой:\n\n"
+            "По всем вопросам, связанным с работой бота или платформы, "
+            "пожалуйста, обращайтесь по адресу электронной почты:\n"
+            "support@sports-platform.ru\n\n"
+            "Или позвоните нам по телефону:\n"
+            "+7 (800) 123-45-67"
+        )
+
+    # Обработчик для принятия приглашения в команду
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('accept_team_'))
+    async def accept_team_invitation_callback(callback_query: types.CallbackQuery):
+        await callback_query.answer("Обрабатываем ваше решение...")
+
         try:
-            parts = callback_data.split('_')
-            if len(parts) < 3:
-                logger.warning(f"Некорректный формат callback_data: {callback_data}")
-                await callback_query.answer("Ошибка: некорректный формат")
-                return
+            invitation_id = int(callback_query.data.split('_')[2])
 
-            action = parts[0]  # accept или decline
-            invitation_type = parts[1]  # team или committee
-            invitation_id = int(parts[2])  # ID приглашения
+            # Вызываем API для принятия приглашения
+            result = await api_client.accept_team_invitation(invitation_id)
 
-            logger.info(f"Разобран callback_data: action={action}, type={invitation_type}, id={invitation_id}")
-
-            # Получаем пользователя
-            user = UserRepository.get_by_telegram_id(str(callback_query.from_user.id))
-            if not user:
-                logger.warning(f"Пользователь не найден для Telegram ID {callback_query.from_user.id}")
-                await callback_query.answer("Ошибка: пользователь не найден")
-                await callback_query.message.answer("Ваш аккаунт не привязан к боту. Отправьте /start для привязки.")
-                return
-
-            # Сообщаем пользователю о начале обработки
-            await callback_query.answer("Обрабатываем ваше решение...")
-
-            # Получаем ID пользователя
-            user_id = user.id if hasattr(user, 'id') else user['id'] if isinstance(user,
-                                                                                   dict) and 'id' in user else None
-            if user_id is None:
-                logger.error("Не удалось определить ID пользователя")
-                raise ValueError("Не удалось определить ID пользователя")
-
-            # Вызываем соответствующий метод API
-            result = None
-            success_message = ""
-
-            if action == "accept" and invitation_type == "team":
-                logger.info(f"Вызываем API для принятия приглашения в команду {invitation_id}")
-                result = await api_client.accept_team_invitation(invitation_id)
-                success_message = "✅ Вы приняли приглашение в команду!"
-
-            elif action == "decline" and invitation_type == "team":
-                logger.info(f"Вызываем API для отклонения приглашения в команду {invitation_id}")
-                result = await api_client.decline_team_invitation(invitation_id)
-                success_message = "❌ Вы отклонили приглашение в команду."
-
-            elif action == "accept" and invitation_type == "committee":
-                logger.info(f"Вызываем API для принятия приглашения в оргкомитет {invitation_id}")
-                result = await api_client.accept_committee_invitation(invitation_id)
-                success_message = "✅ Вы приняли приглашение в оргкомитет!"
-
-            elif action == "decline" and invitation_type == "committee":
-                logger.info(f"Вызываем API для отклонения приглашения в оргкомитет {invitation_id}")
-                result = await api_client.decline_committee_invitation(invitation_id)
-                success_message = "❌ Вы отклонили приглашение в оргкомитет."
-
-            else:
-                logger.warning(f"Неизвестная комбинация action/type: {action}/{invitation_type}")
+            if result and result.get('success'):
                 await callback_query.message.edit_text(
-                    f"{callback_query.message.text}\n\n❓ Неизвестная операция.",
-                    reply_markup=None
-                )
-                return
-
-            # Логируем результат API
-            logger.info(f"Результат API: {result}")
-
-            # Обрабатываем результат вызова API
-            if result and "error" not in result:
-                # Успешно
-                await callback_query.message.edit_text(
-                    f"{callback_query.message.text}\n\n{success_message}",
+                    f"{callback_query.message.text}\n\n✅ Вы приняли приглашение! Вы теперь участник команды {result.get('team_name', '')}.",
                     reply_markup=None
                 )
             else:
-                # Ошибка
-                error_msg = result.get("error", "неизвестная ошибка") if result else "неизвестная ошибка"
+                error_msg = result.get('error', 'неизвестная ошибка') if result else 'нет ответа от API'
                 await callback_query.message.edit_text(
-                    f"{callback_query.message.text}\n\n❌ Не удалось выполнить операцию: {error_msg}",
+                    f"{callback_query.message.text}\n\n❌ Не удалось принять приглашение: {error_msg}",
                     reply_markup=None
                 )
-
         except Exception as e:
-            logger.error(f"Ошибка при обработке callback_query: {e}", exc_info=True)
-            try:
+            logger.error(f"Ошибка при обработке принятия приглашения в команду: {e}")
+            await callback_query.message.edit_text(
+                f"{callback_query.message.text}\n\n❌ Произошла ошибка при обработке приглашения. Пожалуйста, попробуйте позже.",
+                reply_markup=None
+            )
+
+    # Обработчик для отклонения приглашения в команду
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('decline_team_'))
+    async def decline_team_invitation_callback(callback_query: types.CallbackQuery):
+        await callback_query.answer("Обрабатываем ваше решение...")
+
+        try:
+            invitation_id = int(callback_query.data.split('_')[2])
+
+            # Вызываем API для отклонения приглашения
+            result = await api_client.decline_team_invitation(invitation_id)
+
+            if result and result.get('success'):
                 await callback_query.message.edit_text(
-                    f"{callback_query.message.text}\n\n❌ Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже.",
+                    f"{callback_query.message.text}\n\n❌ Вы отклонили приглашение.",
                     reply_markup=None
                 )
-            except Exception as e2:
-                logger.error(f"Невозможно отправить сообщение об ошибке: {e2}")
+            else:
+                error_msg = result.get('error', 'неизвестная ошибка') if result else 'нет ответа от API'
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n❌ Не удалось отклонить приглашение: {error_msg}",
+                    reply_markup=None
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при обработке отклонения приглашения в команду: {e}")
+            await callback_query.message.edit_text(
+                f"{callback_query.message.text}\n\n❌ Произошла ошибка при обработке приглашения. Пожалуйста, попробуйте позже.",
+                reply_markup=None
+            )
+
+    # Обработчик для принятия приглашения в оргкомитет
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('accept_committee_'))
+    async def accept_committee_invitation_callback(callback_query: types.CallbackQuery):
+        await callback_query.answer("Обрабатываем ваше решение...")
+
+        try:
+            invitation_id = int(callback_query.data.split('_')[2])
+
+            # Вызываем API для принятия приглашения
+            result = await api_client.accept_committee_invitation(invitation_id)
+
+            if result and result.get('success'):
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n✅ Вы приняли приглашение! Вы теперь член оргкомитета {result.get('committee_name', '')}.",
+                    reply_markup=None
+                )
+            else:
+                error_msg = result.get('error', 'неизвестная ошибка') if result else 'нет ответа от API'
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n❌ Не удалось принять приглашение: {error_msg}",
+                    reply_markup=None
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при обработке принятия приглашения в оргкомитет: {e}")
+            await callback_query.message.edit_text(
+                f"{callback_query.message.text}\n\n❌ Произошла ошибка при обработке приглашения. Пожалуйста, попробуйте позже.",
+                reply_markup=None
+            )
+
+    # Обработчик для отклонения приглашения в оргкомитет
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith('decline_committee_'))
+    async def decline_committee_invitation_callback(callback_query: types.CallbackQuery):
+        await callback_query.answer("Обрабатываем ваше решение...")
+
+        try:
+            invitation_id = int(callback_query.data.split('_')[2])
+
+            # Вызываем API для отклонения приглашения
+            result = await api_client.decline_committee_invitation(invitation_id)
+
+            if result and result.get('success'):
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n❌ Вы отклонили приглашение.",
+                    reply_markup=None
+                )
+            else:
+                error_msg = result.get('error', 'неизвестная ошибка') if result else 'нет ответа от API'
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n❌ Не удалось отклонить приглашение: {error_msg}",
+                    reply_markup=None
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при обработке отклонения приглашения в оргкомитет: {e}")
+            await callback_query.message.edit_text(
+                f"{callback_query.message.text}\n\n❌ Произошла ошибка при обработке приглашения. Пожалуйста, попробуйте позже.",
+                reply_markup=None
+            )

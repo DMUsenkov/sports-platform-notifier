@@ -1,7 +1,8 @@
+import re
+import logging
 from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 from utils.logger import get_logger
 from database.repositories.user_repository import UserRepository
@@ -12,10 +13,15 @@ from bot.messages.templates import (
     PHONE_NOT_FOUND_MESSAGE,
     PHONE_LINK_ERROR_MESSAGE,
     INVALID_PHONE_FORMAT_MESSAGE,
-    TEAM_INVITATION_MESSAGE,
-    COMMITTEE_INVITATION_MESSAGE
+    TEAM_INVITATION_MESSAGE,  # Добавить импорт
+    COMMITTEE_INVITATION_MESSAGE  # Добавить импорт
 )
-from bot.keyboards.keyboards import get_phone_keyboard, get_start_keyboard, get_help_keyboard
+from bot.keyboards.keyboards import (
+    get_phone_keyboard,
+    get_start_keyboard,
+    get_help_keyboard,
+    get_invitation_keyboard  # Добавить импорт
+)
 
 logger = get_logger("user_handler")
 
@@ -118,7 +124,6 @@ def register_user_handlers(dp: Dispatcher):
         # Проверяем, зарегистрирован ли пользователь с таким номером телефона
         await process_phone_number(message, phone_number, state)
 
-    # Обработчик команды /help
     @dp.message_handler(commands=['help'])
     @dp.message_handler(lambda message: message.text == "Помощь")
     async def cmd_help(message: types.Message):
@@ -132,6 +137,8 @@ def register_user_handlers(dp: Dispatcher):
             "Выберите раздел помощи:",
             reply_markup=get_help_keyboard()
         )
+
+        print("Отправлено меню помощи с клавиатурой")
 
     @dp.message_handler(lambda message: message.text == "Мои матчи")
     async def my_matches(message: types.Message):
@@ -186,11 +193,8 @@ def register_user_handlers(dp: Dispatcher):
                 "Произошла ошибка при получении информации о матчах. Пожалуйста, попробуйте позже."
             )
 
-    # Обновим функцию my_invitations в bot/handlers/user.py
-
-    # Обработчик для просмотра приглашений
-    @dp.message_handler(lambda message: message.text == "Приглашения")
     @dp.message_handler(commands=['invitations'])
+    @dp.message_handler(lambda message: message.text == "Приглашения")
     async def my_invitations(message: types.Message):
         """
         Обработчик запроса информации о приглашениях пользователя
@@ -198,166 +202,64 @@ def register_user_handlers(dp: Dispatcher):
         Args:
             message: Сообщение от пользователя
         """
-        user = UserRepository.get_by_telegram_id(str(message.from_user.id))
+        telegram_id = str(message.from_user.id)
+        user = UserRepository.get_by_telegram_id(telegram_id)
+
         if not user:
             await message.answer(
                 "Ваш аккаунт не привязан к боту. Отправьте /start для привязки."
             )
             return
 
-        try:
-            # Отправляем информационное сообщение о поиске приглашений
-            await message.answer("Ищем ваши приглашения...")
+        await message.answer("Ищем ваши приглашения...")
 
-            # Получаем ID пользователя
-            user_id = user.id if hasattr(user, 'id') else user['id'] if isinstance(user,
-                                                                                   dict) and 'id' in user else None
-            if user_id is None:
-                logger.error("Не удалось определить ID пользователя")
-                raise ValueError("Не удалось определить ID пользователя")
+        try:
+            # Если user это словарь, используем user['id'], иначе user.id
+            user_id = user['id'] if isinstance(user, dict) else user.id
 
             # Получаем список приглашений пользователя через API
-            logger.info(f"Запрашиваем приглашения для пользователя {user_id}")
             invitations = await api_client.get_user_invitations(user_id)
-            logger.info(f"Получен ответ API: {invitations}")
 
-            # Проверяем, есть ли приглашения
-            if invitations is None:
-                logger.warning("API вернул None вместо списка приглашений")
-                await message.answer(
-                    "Не удалось загрузить приглашения. Пожалуйста, попробуйте позже.",
-                    reply_markup=get_start_keyboard()
-                )
-                return
-
-            if not isinstance(invitations, list):
-                logger.warning(f"API вернул не список: {type(invitations)}")
-                await message.answer(
-                    "Получены некорректные данные. Пожалуйста, попробуйте позже.",
-                    reply_markup=get_start_keyboard()
-                )
-                return
-
-            if len(invitations) == 0:
-                logger.info("Список приглашений пуст")
-                await message.answer(
-                    "У вас нет активных приглашений.",
-                    reply_markup=get_start_keyboard()
-                )
+            if not invitations:
+                await message.answer("У вас нет активных приглашений.")
                 return
 
             # Сообщаем о количестве найденных приглашений
-            logger.info(f"Найдено {len(invitations)} приглашений")
-            await message.answer(
-                f"📨 Найдено {len(invitations)} приглашений:",
-                reply_markup=get_start_keyboard()
-            )
+            await message.answer(f"📨 Найдено {len(invitations)} приглашений:")
 
-            # Обрабатываем каждое приглашение
-            count_sent = 0
-            for i, invitation in enumerate(invitations):
-                try:
-                    logger.info(f"Обработка приглашения {i + 1}/{len(invitations)}: {invitation}")
+            for invitation in invitations:
+                if invitation['type'] == 'team':
+                    # Создаем клавиатуру для этого приглашения
+                    markup = get_invitation_keyboard(invitation['invitation_id'], "team")
 
-                    # Проверяем наличие необходимых полей
-                    if not isinstance(invitation, dict):
-                        logger.warning(f"Приглашение не является словарем: {invitation}")
-                        continue
-
-                    invitation_type = invitation.get('type')
-                    invitation_id = invitation.get('invitation_id', invitation.get('id'))
-
-                    logger.info(f"Тип: {invitation_type}, ID: {invitation_id}")
-
-                    if not invitation_type:
-                        logger.warning(f"Отсутствует тип приглашения: {invitation}")
-                        continue
-
-                    if not invitation_id:
-                        logger.warning(f"Отсутствует ID приглашения: {invitation}")
-                        continue
-
-                    # Готовим текст сообщения в зависимости от типа приглашения
-                    message_text = ""
-                    if invitation_type == 'team':
-                        team_name = invitation.get('team_name', 'Неизвестная команда')
-                        sport = invitation.get('sport', 'Не указан')
-                        captain_name = invitation.get('inviter_name', 'Неизвестный капитан')
-
-                        message_text = f"""
-    👥 <b>Приглашение в команду!</b>
-
-    Вас приглашают в команду "<b>{team_name}</b>"!
-    Вид спорта: {sport}
-
-    Капитан: {captain_name}
-    """
-                    elif invitation_type == 'committee':
-                        committee_name = invitation.get('committee_name', 'Неизвестный оргкомитет')
-                        inviter_name = invitation.get('inviter_name', 'Неизвестный организатор')
-
-                        message_text = f"""
-    👔 <b>Приглашение в оргкомитет!</b>
-
-    Вас приглашают в оргкомитет "<b>{committee_name}</b>"!
-
-    Пригласил: {inviter_name}
-    """
-                    else:
-                        logger.warning(f"Неизвестный тип приглашения: {invitation_type}")
-                        continue
-
-                    # Создаем простые callback_data с минимальной информацией
-                    accept_callback = f"accept_{invitation_type}_{invitation_id}"
-                    decline_callback = f"decline_{invitation_type}_{invitation_id}"
-
-                    # Проверяем длину callback_data
-                    if len(accept_callback) > 64 or len(decline_callback) > 64:
-                        logger.warning(
-                            f"callback_data слишком длинный: {len(accept_callback)}/{len(decline_callback)} символов")
-                        # Обрезаем, если нужно
-                        if len(accept_callback) > 64:
-                            accept_callback = accept_callback[:64]
-                        if len(decline_callback) > 64:
-                            decline_callback = decline_callback[:64]
-
-                    # Создаем клавиатуру с кнопками
-                    markup = types.InlineKeyboardMarkup(row_width=2)
-                    accept_button = types.InlineKeyboardButton("Принять", callback_data=accept_callback)
-                    decline_button = types.InlineKeyboardButton("Отклонить", callback_data=decline_callback)
-                    markup.add(accept_button, decline_button)
-
-                    logger.info(
-                        f"Отправляем сообщение с клавиатурой. Accept callback: {accept_callback}, Decline callback: {decline_callback}")
-
-                    # Отправляем сообщение с клавиатурой
+                    # Отправляем отдельное сообщение для каждого приглашения в команду
                     await message.answer(
-                        text=message_text,
+                        TEAM_INVITATION_MESSAGE.format(
+                            team_name=invitation.get('team_name', ''),
+                            sport_type=invitation.get('sport', ''),
+                            captain_name=invitation.get('inviter_name', '')
+                        ),
                         reply_markup=markup,
-                        parse_mode="HTML"
+                        parse_mode="Markdown"  # Используем Markdown для форматирования
                     )
-                    count_sent += 1
-                    logger.info(f"Приглашение {i + 1} успешно отправлено")
+                elif invitation['type'] == 'committee':
+                    # Создаем клавиатуру для этого приглашения
+                    markup = get_invitation_keyboard(invitation['invitation_id'], "committee")
 
-                except Exception as e:
-                    logger.error(f"Ошибка при обработке приглашения {i + 1}: {e}", exc_info=True)
-                    # Продолжаем обработку других приглашений
-
-            # Если не удалось отправить ни одного приглашения
-            if count_sent == 0:
-                logger.warning("Не удалось отправить ни одного приглашения")
-                await message.answer(
-                    "Не удалось загрузить информацию о приглашениях. Пожалуйста, попробуйте позже.",
-                    reply_markup=get_start_keyboard()
-                )
-            else:
-                logger.info(f"Успешно отправлено {count_sent} из {len(invitations)} приглашений")
+                    # Отправляем отдельное сообщение для каждого приглашения в оргкомитет
+                    await message.answer(
+                        COMMITTEE_INVITATION_MESSAGE.format(
+                            committee_name=invitation.get('committee_name', ''),
+                            inviter_name=invitation.get('inviter_name', '')
+                        ),
+                        reply_markup=markup,
+                        parse_mode="Markdown"  # Используем Markdown для форматирования
+                    )
 
         except Exception as e:
-            logger.error(f"Ошибка при получении приглашений пользователя: {e}", exc_info=True)
+            logger.error(f"Ошибка при получении приглашений пользователя {telegram_id}: {e}")
             await message.answer(
-                "Произошла ошибка при получении информации о приглашениях. Пожалуйста, попробуйте позже.",
-                reply_markup=get_start_keyboard()
+                "Произошла ошибка при получении информации о приглашениях. Пожалуйста, попробуйте позже."
             )
 
     @dp.message_handler(lambda message: message.text == "Мои чемпионаты")
@@ -484,83 +386,6 @@ def register_user_handlers(dp: Dispatcher):
                 "Произошла ошибка при получении информации о командах. Пожалуйста, попробуйте позже.",
                 reply_markup=get_start_keyboard()
             )
-
-    # Обработчики колбэков для меню помощи
-    @dp.callback_query_handler(lambda c: c.data == 'help_about')
-    async def help_about(callback_query: types.CallbackQuery):
-        """
-        Обработчик запроса информации о боте
-
-        Args:
-            callback_query: Запрос от кнопки
-        """
-        await callback_query.answer()
-        await callback_query.message.answer(
-            "О боте:\n\n"
-            "Этот бот предназначен для отправки уведомлений пользователям онлайн-платформы "
-            "для поиска и управления любительскими спортивными соревнованиями.\n\n"
-            "Через этот бот вы будете получать актуальную информацию о чемпионатах, "
-            "матчах и командах, в которых вы участвуете."
-        )
-
-    @dp.callback_query_handler(lambda c: c.data == 'help_notification_types')
-    async def help_notification_types(callback_query: types.CallbackQuery):
-        """
-        Обработчик запроса информации о типах уведомлений
-
-        Args:
-            callback_query: Запрос от кнопки
-        """
-        await callback_query.answer()
-        await callback_query.message.answer(
-            "Типы уведомлений:\n\n"
-            "• Заявки на участие в чемпионатах\n"
-            "• Отмена или отклонение заявок\n"
-            "• Отмена или завершение чемпионатов\n"
-            "• Назначение новых матчей\n"
-            "• Перенос матчей\n"
-            "• Результаты прохождения в плей-офф\n"
-            "• Напоминания о матчах\n"
-            "• Новые интересные чемпионаты\n"
-            "• Сообщения от оргкомитетов\n"
-            "• Приглашения в команды\n"
-            "• Приглашения в оргкомитеты"
-        )
-
-    @dp.callback_query_handler(lambda c: c.data == 'help_change_phone')
-    async def help_change_phone(callback_query: types.CallbackQuery):
-        """
-        Обработчик запроса информации о смене номера телефона
-
-        Args:
-            callback_query: Запрос от кнопки
-        """
-        await callback_query.answer()
-        await callback_query.message.answer(
-            "Как привязать другой номер телефона:\n\n"
-            "1. Отправьте команду /changephone\n"
-            "2. Введите новый номер телефона или отправьте контакт\n"
-            "3. Ваш аккаунт будет привязан к новому номеру телефона\n\n"
-            "Обратите внимание, что номер телефона должен быть зарегистрирован в системе."
-        )
-
-    @dp.callback_query_handler(lambda c: c.data == 'help_support')
-    async def help_support(callback_query: types.CallbackQuery):
-        """
-        Обработчик запроса информации о поддержке
-
-        Args:
-            callback_query: Запрос от кнопки
-        """
-        await callback_query.answer()
-        await callback_query.message.answer(
-            "Связаться с поддержкой:\n\n"
-            "По всем вопросам, связанным с работой бота или платформы, "
-            "пожалуйста, обращайтесь по адресу электронной почты:\n"
-            "support@sports-platform.ru\n\n"
-            "Или позвоните нам по телефону:\n"
-            "+7 (800) 123-45-67"
-        )
 
     # Обработчик команды изменения номера телефона
     @dp.message_handler(commands=['changephone'])
